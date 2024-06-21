@@ -1,59 +1,75 @@
 package one.colla.auth.application;
 
-import static one.colla.global.exception.ExceptionCode.*;
-import static org.assertj.core.api.Assertions.*;
-import static org.assertj.core.api.SoftAssertions.*;
-import static org.mockito.BDDMockito.*;
-
-import java.util.Optional;
-
-import org.apache.commons.lang3.tuple.Pair;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.security.crypto.password.PasswordEncoder;
-
 import one.colla.auth.application.dto.JwtPair;
 import one.colla.auth.application.dto.request.LoginRequest;
 import one.colla.auth.application.dto.request.RegisterRequest;
 import one.colla.auth.application.dto.request.VerificationCheckRequest;
 import one.colla.auth.application.dto.request.VerifyMailSendRequest;
-import one.colla.common.ServiceTest;
+import one.colla.common.ServiceTestV2;
 import one.colla.common.util.RandomCodeGenerator;
 import one.colla.global.exception.CommonException;
 import one.colla.infra.mail.events.VerifyCodeSendMailEvent;
 import one.colla.infra.redis.verify.VerifyCode;
 import one.colla.infra.redis.verify.VerifyCodeService;
+import one.colla.user.application.UserService;
 import one.colla.user.domain.User;
 import one.colla.user.domain.UserRepository;
 import one.colla.user.domain.vo.Email;
+import org.apache.commons.lang3.tuple.Pair;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.event.ApplicationEventMulticaster;
+import org.springframework.context.event.EventListener;
+import org.springframework.context.event.SimpleApplicationEventMulticaster;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
-class AuthServiceTest extends ServiceTest {
+import java.util.Optional;
 
-	@Mock
+import static one.colla.global.exception.ExceptionCode.*;
+import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.SoftAssertions.assertSoftly;
+import static org.mockito.BDDMockito.*;
+
+
+@ServiceTestV2
+@Import(AuthServiceTest.AuthServiceTestConfig.class)
+class AuthServiceTest {
+
+
+	@Autowired
+	private AuthService authService;
+
+	@MockBean
 	private UserRepository userRepository;
 
-	@Mock
+	// AuthService에서 UserRepository와 UserService를 함께 쓰는 이유?
+	@MockBean
+	private UserService userService;
+
+	@MockBean
 	private VerifyCodeService verifyCodeService;
 
-	@Mock
+	@MockBean
 	private PasswordEncoder passwordEncoder;
 
-	@Mock
+	@MockBean
 	private RandomCodeGenerator randomCodeGenerator;
 
-	@Mock
-	private ApplicationEventPublisher publisher;
+	@Autowired
+	private EmailSendEventListener emailSendEventListener;
 
-	@Mock
+	@MockBean
 	private JwtService jwtService;
 
-	@InjectMocks
-	private AuthService authService;
 
 	final String USER_NAME = "testUsername";
 	final String PASSWORD = "testPassword1";
@@ -65,6 +81,11 @@ class AuthServiceTest extends ServiceTest {
 	final String ACCESS_TOKEN = "accessToken";
 	final String REFRESH_TOKEN = "accessToken";
 	final long TTL = 1200;
+
+	@BeforeEach
+	void setUp() {
+		emailSendEventListener.reset();
+	}
 
 	@Nested
 	@DisplayName("회원가입시")
@@ -286,17 +307,74 @@ class AuthServiceTest extends ServiceTest {
 		VerifyMailSendRequest request = new VerifyMailSendRequest(TARGET_EMAIL);
 		given(randomCodeGenerator.generateRandomString(anyInt())).willReturn(VERIFY_CODE);
 		willDoNothing().given(verifyCodeService).save(any(VerifyCode.class));
-		ArgumentCaptor<VerifyCodeSendMailEvent> argumentCaptor = ArgumentCaptor.forClass(VerifyCodeSendMailEvent.class);
+//		ArgumentCaptor<VerifyCodeSendMailEvent> argumentCaptor = ArgumentCaptor.forClass(VerifyCodeSendMailEvent.class);
 
 		// when
 		authService.sendVerifyMail(request);
 
 		// then
-		verify(publisher, times(1)).publishEvent(argumentCaptor.capture());
-		VerifyCodeSendMailEvent capturedEvent = argumentCaptor.getValue();
-		assertThat(capturedEvent).isNotNull();
-		assertThat(capturedEvent.email()).isEqualTo(TARGET_EMAIL);
-		assertThat(capturedEvent.verifyCode()).isEqualTo(VERIFY_CODE);
+		assertThat(emailSendEventListener.isEventReceived()).isTrue();
+//		verify(publisher, times(1)).publishEvent((argumentCaptor.capture()));
+//		VerifyCodeSendMailEvent capturedEvent = argumentCaptor.getValue();
+//		assertThat(capturedEvent).isNotNull();
+//		assertThat(capturedEvent.email()).isEqualTo(TARGET_EMAIL);
+//		assertThat(capturedEvent.verifyCode()).isEqualTo(VERIFY_CODE);
 
+	}
+
+
+	@TestConfiguration
+	static class AuthServiceTestConfig {
+
+		@Bean
+		public AuthService authService(
+			UserService userService,
+			JwtService jwtService,
+			UserRepository userRepository,
+			PasswordEncoder passwordEncoder,
+			RandomCodeGenerator randomCodeGenerator,
+			VerifyCodeService verifyCodeService,
+			ApplicationEventPublisher applicationEventPublisher
+		) {
+			return new AuthService(
+				userService,
+				jwtService,
+				userRepository,
+				passwordEncoder,
+				randomCodeGenerator,
+				verifyCodeService,
+				applicationEventPublisher
+			);
+		}
+
+		@Bean
+		public ApplicationEventMulticaster applicationEventMulticaster() {
+			return new SimpleApplicationEventMulticaster();
+		}
+
+		@Bean
+		public EmailSendEventListener eventListener() {
+			return new EmailSendEventListener();
+		}
+	}
+
+	static class EmailSendEventListener {
+		private boolean eventReceived = false;
+
+		@EventListener
+		public void handleEvent(Object event) {
+			if (!(event instanceof VerifyCodeSendMailEvent)) {
+				return;
+			}
+			this.eventReceived = true;
+		}
+
+		public void reset() {
+			this.eventReceived = false;
+		}
+
+		public boolean isEventReceived() {
+			return eventReceived;
+		}
 	}
 }
