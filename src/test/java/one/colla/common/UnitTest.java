@@ -15,15 +15,15 @@ import java.lang.annotation.Target;
 @ActiveProfiles("test")
 @SpringJUnitConfig
 @RecordApplicationEvents
-@Import(ServiceTestConfig.class)
+@Import(UnitTestCommonConfig.class)
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
-public @interface ServiceTestV2 {
+public @interface UnitTest {
 }
 
 
 @TestConfiguration
-class ServiceTestConfig {
+class UnitTestCommonConfig {
 
 //	@Bean
 //	public TestFixtureBuilder testFixtureBuilder() {
