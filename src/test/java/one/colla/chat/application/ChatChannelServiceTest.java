@@ -28,12 +28,14 @@ import one.colla.chat.domain.ChatChannel;
 import one.colla.chat.domain.ChatChannelMessage;
 import one.colla.chat.domain.ChatChannelMessageRepository;
 import one.colla.chat.domain.ChatChannelRepository;
+import one.colla.chat.domain.UserChatChannel;
 import one.colla.chat.domain.UserChatChannelRepository;
 import one.colla.common.ServiceTest;
 import one.colla.common.security.authentication.CustomUserDetails;
 import one.colla.global.exception.CommonException;
 import one.colla.global.exception.ExceptionCode;
 import one.colla.teamspace.application.TeamspaceService;
+import one.colla.teamspace.application.dto.response.UnreadMessageCountResponse;
 import one.colla.teamspace.domain.Teamspace;
 import one.colla.teamspace.domain.UserTeamspace;
 import one.colla.user.domain.User;
@@ -480,6 +482,132 @@ class ChatChannelServiceTest extends ServiceTest {
 			assertThatThrownBy(() -> chatChannelService.deleteChatChannel(USER1_DETAILS, OS_TEAMSPACE.getId(), 999L))
 				.isExactlyInstanceOf(CommonException.class)
 				.hasMessageContaining(ExceptionCode.NOT_FOUND_CHAT_CHANNEL.getMessage());
+		}
+	}
+
+	@Nested
+	@DisplayName("팀스페이스 안읽은 메시지 개수 조회시")
+	class GetTeamspaceUnreadMessageCountTest {
+
+		ChatChannel FRONTEND_CHAT_CHANNEL;
+		ChatChannel BACKEND_CHAT_CHANNEL;
+
+		@BeforeEach
+		void setUp() {
+			/* 채팅 채널 생성 */
+			FRONTEND_CHAT_CHANNEL = testFixtureBuilder.buildChatChannel(FRONTEND_CHAT_CHANNEL(OS_TEAMSPACE));
+			BACKEND_CHAT_CHANNEL = testFixtureBuilder.buildChatChannel(BACKEND_CHAT_CHANNEL(OS_TEAMSPACE));
+
+			/* 팀스페이스에 채팅 채널 추가 */
+			OS_TEAMSPACE.addChatChannel(FRONTEND_CHAT_CHANNEL);
+			OS_TEAMSPACE.addChatChannel(BACKEND_CHAT_CHANNEL);
+
+			/* 채팅 채널 유저 참가 */
+			testFixtureBuilder.buildUserChatChannel(
+				FRONTEND_CHAT_CHANNEL.participateAllTeamspaceUser(OS_TEAMSPACE.getUserTeamspaces()));
+			testFixtureBuilder.buildUserChatChannel(
+				BACKEND_CHAT_CHANNEL.participateAllTeamspaceUser(OS_TEAMSPACE.getUserTeamspaces()));
+		}
+
+		@Test
+		@DisplayName("팀스페이스의 모든 채팅 채널에서 안읽은 메시지 개수의 합계를 반환한다")
+		void getTeamspaceUnreadCount_Success() {
+			// given
+			// 첫 번째 채널에 메시지 5개 생성
+			for (int i = 0; i < 5; i++) {
+				ChatChannelMessage msg = testFixtureBuilder.buildChatChannelMessage(
+					CHAT_MESSAGE1(USER2, OS_TEAMSPACE, FRONTEND_CHAT_CHANNEL));
+				FRONTEND_CHAT_CHANNEL.updateLastChatMessage(msg.getId());
+			}
+
+			// 두 번째 채널에 메시지 3개 생성
+			for (int i = 0; i < 3; i++) {
+				ChatChannelMessage msg = testFixtureBuilder.buildChatChannelMessage(
+					CHAT_MESSAGE1(USER2, OS_TEAMSPACE, BACKEND_CHAT_CHANNEL));
+				BACKEND_CHAT_CHANNEL.updateLastChatMessage(msg.getId());
+			}
+
+			// USER1의 첫 번째 채널에서 3개 메시지를 읽음 표시
+			UserChatChannel userChatChannel = userChatChannelRepository
+				.findByUserIdAndChatChannelId(USER1.getId(), FRONTEND_CHAT_CHANNEL.getId())
+				.orElseThrow();
+
+			// 첫 번째 채널의 세 번째 메시지까지 읽음 처리 (2개 안읽음 상태로 설정)
+			ChatChannelMessage thirdMessage = chatChannelMessageRepository
+				.findChatChannelMessageByChatChannelAndCriteria(FRONTEND_CHAT_CHANNEL, null,
+					PageRequest.of(0, 5))
+				.get(2);
+
+			userChatChannel.updateLastReadMessageId(thirdMessage.getId());
+
+			// when
+			UnreadMessageCountResponse response = chatChannelService
+				.getTeamspaceUnreadMessageCount(USER1_DETAILS, OS_TEAMSPACE.getId());
+
+			// then
+			// 예상 결과: 첫 번째 채널에서 2개(5개 중 3개 읽음) + 두 번째 채널에서 3개 = 총 5개 안읽음
+			SoftAssertions.assertSoftly(softly -> {
+				softly.assertThat(response).isNotNull();
+				softly.assertThat(response.unreadMessageCount()).isEqualTo(5);
+			});
+		}
+
+		@Test
+		@DisplayName("모든 메시지를 읽은 경우 0을 반환한다")
+		void getTeamspaceUnreadCount_AllRead() {
+			// given
+			// 첫 번째 채널에 메시지 5개 생성
+			ChatChannelMessage lastMsg = null;
+			for (int i = 0; i < 5; i++) {
+				lastMsg = testFixtureBuilder.buildChatChannelMessage(
+					CHAT_MESSAGE1(USER2, OS_TEAMSPACE, FRONTEND_CHAT_CHANNEL));
+				FRONTEND_CHAT_CHANNEL.updateLastChatMessage(lastMsg.getId());
+			}
+
+			// USER1의 모든 메시지를 읽음 표시
+			UserChatChannel userChatChannel = userChatChannelRepository
+				.findByUserIdAndChatChannelId(USER1.getId(), FRONTEND_CHAT_CHANNEL.getId())
+				.orElseThrow();
+
+			userChatChannel.updateLastReadMessageId(lastMsg.getId());
+
+			// when
+			UnreadMessageCountResponse response = chatChannelService
+				.getTeamspaceUnreadMessageCount(USER1_DETAILS, OS_TEAMSPACE.getId());
+
+			// then
+			SoftAssertions.assertSoftly(softly -> {
+				softly.assertThat(response).isNotNull();
+				softly.assertThat(response.unreadMessageCount()).isEqualTo(0);
+			});
+		}
+
+		@Test
+		@DisplayName("메시지가 없는 경우 0을 반환한다")
+		void getTeamspaceUnreadCount_NoMessages() {
+			// when
+			UnreadMessageCountResponse response = chatChannelService
+				.getTeamspaceUnreadMessageCount(USER1_DETAILS, OS_TEAMSPACE.getId());
+
+			// then
+			SoftAssertions.assertSoftly(softly -> {
+				softly.assertThat(response).isNotNull();
+				softly.assertThat(response.unreadMessageCount()).isEqualTo(0);
+			});
+		}
+
+		@Test
+		@DisplayName("팀스페이스 접근 권한이 없으면 예외가 발생한다")
+		void getTeamspaceUnreadCount_Fail_NoAccess() {
+			// given
+			User OTHER_USER = testFixtureBuilder.buildUser(RANDOMUSER());
+			CustomUserDetails OTHER_USER_DETAILS = createCustomUserDetailsByUser(OTHER_USER);
+
+			// when & then
+			assertThatThrownBy(() ->
+				chatChannelService.getTeamspaceUnreadMessageCount(OTHER_USER_DETAILS, OS_TEAMSPACE.getId()))
+				.isExactlyInstanceOf(CommonException.class)
+				.hasMessageContaining(ExceptionCode.FORBIDDEN_TEAMSPACE.getMessage());
 		}
 	}
 }
