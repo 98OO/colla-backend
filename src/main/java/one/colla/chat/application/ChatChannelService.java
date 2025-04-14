@@ -29,6 +29,7 @@ import one.colla.common.security.authentication.CustomUserDetails;
 import one.colla.global.exception.CommonException;
 import one.colla.global.exception.ExceptionCode;
 import one.colla.teamspace.application.TeamspaceService;
+import one.colla.teamspace.application.dto.response.UnreadMessageCountResponse;
 import one.colla.teamspace.domain.Teamspace;
 import one.colla.teamspace.domain.TeamspaceRole;
 import one.colla.teamspace.domain.UserTeamspace;
@@ -158,6 +159,21 @@ public class ChatChannelService {
 		userTeamspace.getTeamspace().removeChatChannel(chatChannel);
 		chatChannelMessageRepository.deleteAllByChatChannel(chatChannel);
 		chatChannelRepository.delete(chatChannel);
+	}
+
+	@Transactional(readOnly = true)
+	public UnreadMessageCountResponse getTeamspaceUnreadMessageCount(
+		final CustomUserDetails userDetails,
+		final Long teamspaceId
+	) {
+		final Teamspace teamspace = teamspaceService.getUserTeamspace(userDetails, teamspaceId).getTeamspace();
+
+		int totalUnreadCount = teamspace.getChatChannels().stream()
+			.mapToInt(chatChannel -> calculateUnreadMessageCount(userDetails.getUserId(), chatChannel))
+			.sum();
+
+		log.info("팀스페이스 안읽은 메시지 개수 조회 - 팀스페이스 Id: {}, 조회한 사용자 Id: {}", teamspaceId, userDetails.getUserId());
+		return UnreadMessageCountResponse.of(totalUnreadCount);
 	}
 
 	private ChatChannel getChatChannel(Teamspace teamspace, Long chatChannelId) {

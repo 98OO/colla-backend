@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.ResultMatcher;
 import com.epages.restdocs.apispec.ResourceSnippetParameters;
 import com.epages.restdocs.apispec.Schema;
 
+import one.colla.chat.application.ChatChannelService;
 import one.colla.common.ControllerTest;
 import one.colla.common.presentation.ApiResponse;
 import one.colla.common.security.authentication.CustomUserDetails;
@@ -44,12 +45,16 @@ import one.colla.teamspace.application.dto.response.TagDto;
 import one.colla.teamspace.application.dto.response.TeamspaceInfoResponse;
 import one.colla.teamspace.application.dto.response.TeamspaceParticipantsResponse;
 import one.colla.teamspace.application.dto.response.TeamspaceSettingsResponse;
+import one.colla.teamspace.application.dto.response.UnreadMessageCountResponse;
 
 @WebMvcTest(TeamspaceController.class)
 class TeamspaceControllerTest extends ControllerTest {
 
 	@MockBean
 	private TeamspaceService teamspaceService;
+
+	@MockBean
+	private ChatChannelService chatChannelService;
 
 	@Nested
 	@DisplayName("팀스페이스 생성 문서화")
@@ -687,6 +692,56 @@ class TeamspaceControllerTest extends ControllerTest {
 						.description("특정 팀스페이스의 프로필 사진을 삭제합니다.")
 						.pathParameters(
 							parameterWithName("teamspaceId").description("팀스페이스의 고유 식별자")
+						)
+						.responseFields(responseFields)
+						.responseSchema(Schema.schema(responseSchemaTitle))
+						.build()
+					)))
+				.andDo(print());
+		}
+	}
+
+	@Nested
+	@DisplayName("팀스페이스 안읽은 메시지 개수 조회 문서화")
+	class GetTeamspaceUnreadCountDocs {
+		Long teamspaceId = 1L;
+		UnreadMessageCountResponse response = new UnreadMessageCountResponse(5);
+
+		@Test
+		@WithMockCustomUser
+		@DisplayName("팀스페이스 안읽은 메시지 개수 조회 성공")
+		void getTeamspaceUnreadMessageCountSuccessfully() throws Exception {
+			given(chatChannelService.getTeamspaceUnreadMessageCount(any(CustomUserDetails.class), eq(teamspaceId)))
+				.willReturn(response);
+
+			doTest(
+				ApiResponse.createSuccessResponse(response),
+				status().isOk(),
+				apiDocHelper.createSuccessResponseFields(
+					fieldWithPath("unreadMessageCount").description("안읽은 메시지 개수").type(JsonFieldType.NUMBER)
+				),
+				"ApiResponse<UnreadMessageCountResponse>"
+			);
+		}
+
+		private void doTest(
+			ApiResponse<?> response,
+			ResultMatcher statusMatcher,
+			FieldDescriptor[] responseFields,
+			String responseSchemaTitle
+		) throws Exception {
+			mockMvc.perform(get("/api/v1/teamspaces/{teamspaceId}/unread-count", teamspaceId)
+					.with(csrf())
+					.accept(MediaType.APPLICATION_JSON))
+				.andExpect(statusMatcher)
+				.andExpect(content().json(
+					objectMapper.writeValueAsString(response)))
+				.andDo(restDocs.document(
+					resource(ResourceSnippetParameters.builder()
+						.tag("teamspace-controller")
+						.description("특정 팀스페이스 내의 안읽은 메시지 개수를 조회합니다.")
+						.pathParameters(
+							parameterWithName("teamspaceId").description("팀스페이스 ID")
 						)
 						.responseFields(responseFields)
 						.responseSchema(Schema.schema(responseSchemaTitle))

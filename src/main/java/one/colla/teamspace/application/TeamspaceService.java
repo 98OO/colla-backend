@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +15,8 @@ import jakarta.annotation.Nullable;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import one.colla.chat.domain.ChatChannel;
+import one.colla.chat.domain.ChatChannelMessage;
+import one.colla.chat.domain.ChatChannelMessageRepository;
 import one.colla.chat.domain.ChatChannelRepository;
 import one.colla.chat.domain.UserChatChannel;
 import one.colla.chat.domain.UserChatChannelRepository;
@@ -69,6 +72,7 @@ public class TeamspaceService {
 	private final RandomCodeGenerator randomCodeGenerator;
 	private final UserChatChannelRepository userChatChannelRepository;
 	private final ChatChannelRepository chatChannelRepository;
+	private final ChatChannelMessageRepository chatChannelMessageRepository;
 
 	@Transactional
 	public CreateTeamspaceResponse create(final CustomUserDetails userDetails, final CreateTeamspaceRequest request) {
@@ -161,12 +165,34 @@ public class TeamspaceService {
 		}
 
 		final UserTeamspace participatedUserTeamspace = user.participate(teamspace, TeamspaceRole.MEMBER);
+
 		final List<UserChatChannel> participatedUserChatChannels = teamspace.getChatChannels().stream()
-			.map(ch -> ch.participateTeamspaceUser(participatedUserTeamspace))
+			.map(chatChannel -> {
+				UserChatChannel userChatChannel = chatChannel.participateTeamspaceUser(participatedUserTeamspace);
+
+				Long latestMessageId = getLatestMessageIdForChannel(chatChannel);
+
+				if (latestMessageId != null) {
+					userChatChannel.updateLastReadMessageId(latestMessageId);
+				}
+				return userChatChannel;
+			})
 			.toList();
+
 		userTeamspaceRepository.save(participatedUserTeamspace);
 		userChatChannelRepository.saveAll(participatedUserChatChannels);
 		log.info("팀스페이스 참가 - 팀스페이스 Id: {}, 사용자 Id: {}", teamspaceId, user.getId());
+	}
+
+	private Long getLatestMessageIdForChannel(ChatChannel chatChannel) {
+		List<ChatChannelMessage> latestMessages = chatChannelMessageRepository
+			.findChatChannelMessageByChatChannelAndCriteria(
+				chatChannel,
+				null,
+				Pageable.ofSize(1)
+			);
+
+		return latestMessages.isEmpty() ? null : latestMessages.get(0).getId();
 	}
 
 	@Transactional(readOnly = true)

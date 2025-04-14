@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import one.colla.chat.application.ChatChannelService;
 import one.colla.common.presentation.ApiResponse;
 import one.colla.common.security.authentication.CustomUserDetails;
 import one.colla.teamspace.application.TeamspaceService;
@@ -31,12 +32,14 @@ import one.colla.teamspace.application.dto.response.InviteCodeResponse;
 import one.colla.teamspace.application.dto.response.TeamspaceInfoResponse;
 import one.colla.teamspace.application.dto.response.TeamspaceParticipantsResponse;
 import one.colla.teamspace.application.dto.response.TeamspaceSettingsResponse;
+import one.colla.teamspace.application.dto.response.UnreadMessageCountResponse;
 
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/teamspaces")
 public class TeamspaceController {
 	private final TeamspaceService teamspaceService;
+	private final ChatChannelService chatChannelService;
 
 	@PostMapping
 	@PreAuthorize("isAuthenticated()")
@@ -150,5 +153,17 @@ public class TeamspaceController {
 	) {
 		teamspaceService.deleteProfileImageUrl(userDetails, teamspaceId);
 		return ResponseEntity.ok().body(ApiResponse.createSuccessResponse(Map.of()));
+	}
+
+	@GetMapping("/{teamspaceId}/unread-count")
+	@PreAuthorize("isAuthenticated()")
+	public ResponseEntity<ApiResponse<UnreadMessageCountResponse>> getTeamspaceUnreadMessageCount(
+		@AuthenticationPrincipal final CustomUserDetails userDetails,
+		@PathVariable final Long teamspaceId
+	) {
+		return ResponseEntity.ok()
+			.body(ApiResponse.createSuccessResponse(
+				chatChannelService.getTeamspaceUnreadMessageCount(userDetails, teamspaceId))
+			);
 	}
 }
