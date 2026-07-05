@@ -104,21 +104,12 @@ cloud:
 management:
   endpoints:
     enabled-by-default: false
-    jmx:
-      exposure:
-        exclude: "*"
     web:
       base-path: "/monitor"
       exposure:
-        include: prometheus, health
+        include: health
   endpoint:
-    prometheus:
-      enabled: true
     health:
-      enabled: true
-server:
-  tomcat:
-    mbeanregistry:
       enabled: true
 
 ---
@@ -219,20 +210,12 @@ cloud:
 management:
   endpoints:
     enabled-by-default: false
-    jmx:
-      exposure:
-        exclude: "*"
     web:
       base-path: ${ACTUATOR_PATH}
       exposure:
-        include: prometheus, health
+        include: health
   endpoint:
-    prometheus:
-      enabled: true
     health:
       enabled: true
 server:
-  port: 80
-  tomcat:
-    mbeanregistry:
-      enabled: true
+  port: 8080

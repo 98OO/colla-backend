@@ -1,0 +1,133 @@
+name: V2 AWS - Continuous Deploy
+
+on:
+  push:
+    branches: [ "v2-aws" ]
+  workflow_dispatch:
+
+env:
+  CONTAINER_NAME: colla
+  IMAGE_NAME: ${{ github.repository }}
+  APP_PORT: 8080
+  HEALTH_CHECK_PATH: ${{ secrets.HEALTH_CHECK_PATH }}
+  HEALTH_CHECK_RETRIES: 5
+  HEALTH_CHECK_RETRY_DELAY: 10
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-22.04
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_ACCESS_TOKEN }}
+          submodules: 'recursive'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'corretto'
+
+      - name: Build
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/arm64
+
+  deploy:
+    needs: build-and-upload
+    runs-on: [ self-hosted, aws-ec2 ]
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the Docker image
+        run: docker pull ${{ needs.build-and-upload.outputs.image-tag }}
+
+      - name: Generate health check token
+        id: generate-token
+        run: |
+          echo "::add-mask::${{ secrets.HEALTH_CHECK_TOKEN }}"
+          echo "token=${{ secrets.HEALTH_CHECK_TOKEN }}" >> $GITHUB_OUTPUT
+
+      - name: Run the Docker container
+        run: |
+          # Stop and remove existing containers
+          docker stop ${{ env.CONTAINER_NAME }} || true
+          docker rm ${{ env.CONTAINER_NAME }} || true
+
+          # Remove unused images to free up space
+          docker image prune -f
+
+          # Run new container. Host networking so the app reaches MySQL/Redis
+          # (docker-compose) on localhost; host nginx reverse-proxies 443 -> APP_PORT.
+          docker run -d --name ${{ env.CONTAINER_NAME }} --network host \
+            -v /home/ubuntu/logs:/logs \
+            -e TZ=Asia/Seoul \
+            -e HEALTH_CHECK_TOKEN=${{ steps.generate-token.outputs.token }} \
+            ${{ needs.build-and-upload.outputs.image-tag }}
+
+      - name: Health check
+        run: |
+          # Wait for container to start
+          sleep 20
+
+          # Perform health check with retries
+          status="DOWN"
+          for i in $(seq 1 ${{ env.HEALTH_CHECK_RETRIES }}); do
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${{ env.APP_PORT }}/${{ env.HEALTH_CHECK_PATH }}/health || echo "Failed")
+
+          if [[ "$response" == "200" ]]; then
+          status="UP"
+          break
+          fi
+
+          echo "Health check attempt $i failed, retrying in ${{ env.HEALTH_CHECK_RETRY_DELAY }} seconds..."
+          sleep ${{ env.HEALTH_CHECK_RETRY_DELAY }}
+          done
+
+          if [[ "$status" != "UP" ]]; then
+            echo "Deployment failed health check after ${{ env.HEALTH_CHECK_RETRIES }} attempts"
+            exit 1
+          fi
+
+          echo "Successfully deployed and health check passed"

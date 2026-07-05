@@ -63,11 +63,6 @@ dependencies {
     testImplementation "com.epages:restdocs-api-spec-mockmvc:0.18.2"
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.0.2'
 
-    /* Logback JSON */
-    implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
-    compileOnly 'ch.qos.logback.contrib:logback-jackson:0.1.5'
-    compileOnly 'ch.qos.logback.contrib:logback-json-classic:0.1.5'
-
     /* Gmail */
     implementation 'org.springframework.boot:spring-boot-starter-mail:3.2.4'
 
@@ -82,9 +77,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-websocket:3.2.4'
     implementation 'org.springframework.security:spring-security-messaging:6.2.4'
 
-    /* visibility */
+    /* health check (actuator health endpoint only) */
     implementation 'org.springframework.boot:spring-boot-starter-actuator:3.2.4'
-    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     implementation 'com.github.gavlyukovskiy:p6spy-spring-boot-starter:1.9.2'
 
