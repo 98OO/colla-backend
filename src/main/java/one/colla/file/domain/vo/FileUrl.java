@@ -14,7 +14,8 @@ import one.colla.global.exception.VoException;
 @Getter
 public class FileUrl extends Url {
 	private static final List<String> ALLOWED_URL_PREFIXES = List.of(
-		"https://cdn.colla.so/"
+		"https://cdn.colla.so/",
+		"https://colla-v2-uploads-120766982296.s3.ap-northeast-2.amazonaws.com/"
 	);
 
 	@Column(name = "file_url", nullable = false)
