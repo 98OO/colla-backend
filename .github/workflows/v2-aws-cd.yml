@@ -25,9 +25,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_ACCESS_TOKEN }}
-          submodules: 'recursive'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -100,7 +97,9 @@ jobs:
 
           # Run new container. Host networking so the app reaches MySQL/Redis
           # (docker-compose) on localhost; host nginx reverse-proxies 443 -> APP_PORT.
+          # Secrets are injected from a server-side env file (not baked into the image).
           docker run -d --name ${{ env.CONTAINER_NAME }} --network host \
+            --env-file /home/ubuntu/colla.env \
             -v /home/ubuntu/logs:/logs \
             -e TZ=Asia/Seoul \
             -e HEALTH_CHECK_TOKEN=${{ steps.generate-token.outputs.token }} \
